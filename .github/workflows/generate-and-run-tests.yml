@@ -1,0 +1,59 @@
+name: Generate and Run API Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      apiKey:
+        description: 'AI Service API Key (leave empty to use secrets)'
+        required: false
+
+jobs:
+  generate-and-run-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build project
+      run: mvn clean compile
+    
+    - name: Generate API tests
+      env:
+        AI_API_KEY: ${{ inputs.apiKey || secrets.AI_API_KEY }}
+      run: |
+        # Create or update application.properties with the correct API key
+        echo "swagger.url=https://petstore.swagger.io/v2/swagger.json" > src/main/resources/application.properties
+        echo "base.api.url=https://petstore.swagger.io/v2" >> src/main/resources/application.properties
+        echo "ai.provider=claude" >> src/main/resources/application.properties
+        echo "claude.api.key=${CLAUDE_AI_API_KEY}" >> src/main/resources/application.properties
+        echo "openai.api.key=${AI_API_KEY}" >> src/main/resources/application.properties
+        echo "generate.tests.only=true" >> src/main/resources/application.properties
+        echo "run.tests.only=false" >> src/main/resources/application.properties
+        echo "max.endpoints=5" >> src/main/resources/application.properties
+        echo "max.test.cases.per.endpoint=2" >> src/main/resources/application.properties
+        
+        # Run the test generation
+        mvn exec:java
+    
+    - name: Run generated tests
+      run: mvn test
+    
+    - name: Archive test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: |
+          target/surefire-reports
+          target/test-cases.json
+        if-no-files-found: warn

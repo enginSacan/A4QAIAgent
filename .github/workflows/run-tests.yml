@@ -1,0 +1,77 @@
+name: Run API Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/test/java/com/aiagent/generated/**'
+  schedule:
+    - cron: '0 0 * * 1'  # Run weekly on Mondays at midnight
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build project
+      run: mvn clean compile
+    
+    - name: Run API tests
+      run: |
+        # Configure to only run existing tests
+        echo "swagger.url=https://petstore.swagger.io/v2/swagger.json" > src/main/resources/application.properties
+        echo "base.api.url=https://petstore.swagger.io/v2" >> src/main/resources/application.properties
+        echo "generate.tests.only=false" >> src/main/resources/application.properties
+        echo "run.tests.only=true" >> src/main/resources/application.properties
+        
+        # Run tests
+        mvn test
+    
+    - name: Generate test report
+      if: always()
+      run: |
+        # Create a simple summary of test results
+        echo "# API Test Results" > test-report.md
+        echo "Run completed at $(date)" >> test-report.md
+        echo "" >> test-report.md
+        echo "## Summary" >> test-report.md
+        
+        TOTAL=$(grep -r "Tests run:" target/surefire-reports/*.txt | awk '{s+=$3} END {print s}')
+        FAILURES=$(grep -r "Tests run:" target/surefire-reports/*.txt | awk '{s+=$5} END {print s}')
+        ERRORS=$(grep -r "Tests run:" target/surefire-reports/*.txt | awk '{s+=$7} END {print s}')
+        SKIPPED=$(grep -r "Tests run:" target/surefire-reports/*.txt | awk '{s+=$9} END {print s}')
+        
+        echo "- Total tests: $TOTAL" >> test-report.md
+        echo "- Failures: $FAILURES" >> test-report.md
+        echo "- Errors: $ERRORS" >> test-report.md
+        echo "- Skipped: $SKIPPED" >> test-report.md
+        
+        echo "" >> test-report.md
+        echo "## Details" >> test-report.md
+        
+        find target/surefire-reports -name "*.txt" | sort | while read file; do
+          className=$(basename "$file" .txt)
+          echo "### $className" >> test-report.md
+          grep -A 1 "Tests run:" "$file" >> test-report.md
+          echo "" >> test-report.md
+        done
+    
+    - name: Upload test report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-report
+        path: |
+          test-report.md
+          target/surefire-reports
+        if-no-files-found: warn
